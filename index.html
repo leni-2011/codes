@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title></title>
+  <meta name="theme-color" content="#0e0e10">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <main id="hub">
+    <div class="container">
+      <header class="masthead">
+        <span class="wordmark">mimi</span>
+      </header>
+
+      <section class="intro">
+        <h1 class="title">Share your SoloLearn web code as a standalone page.</h1>
+        <p class="subtitle">Paste a code link or ID below. You'll get a link anyone can open, no SoloLearn account
+          needed.</p>
+      </section>
+
+      <section class="form">
+        <label class="field-label" for="codeInput">Code link or ID</label>
+        <div class="input-group">
+          <div class="input-wrapper">
+            <input type="text" id="codeInput" placeholder="sololearn.com/compiler-playground/…" spellcheck="false"
+              autocomplete="off" value="https://sololearn.com/compiler-playground/W7SXQzUEbvij/?ref=app" />
+            <button id="clearBtn" type="button" class="clear-btn" aria-label="Clear input" title="Clear">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <button id="goBtn" type="button">Generate</button>
+        </div>
+
+        <div id="result" class="result hidden">
+          <div id="errorMsg" class="error hidden"></div>
+
+          <div id="successBlock" class="success hidden">
+            <span class="result-label">Your link</span>
+            <div class="result-url-row">
+              <input type="text" id="resultUrl" readonly />
+              <div class="result-actions">
+                <button id="copyBtn" type="button">Copy</button>
+                <button id="openBtn" type="button">Open</button>
+              </div>
+            </div>
+            <span id="codeName" class="code-name"></span>
+          </div>
+
+          <div id="loader" class="loader hidden">
+            <div class="spinner"></div>
+            <span>Fetching code from SoloLearn…</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="how">
+        <h2 class="how-title">How it works</h2>
+        <ol class="how-steps">
+          <li>Your code is fetched from SoloLearn, into your browser. (No backend!)</li>
+          <li>The HTML, CSS and JS are joined into a single page.</li>
+          <li>That page runs inside a sandboxed iframe each time someone opens your link.</li>
+          <li>Links are permanent. The URL never changes, and edits you make on SoloLearn show up automatically, as long as the code stays public.</li>
+        </ol>
+      </section>
+    </div>
+  </main>
+
+  <section id="runner" class="runner hidden">
+    <iframe id="runnerFrame" class="runner-frame"
+      sandbox="allow-scripts allow-modals allow-forms allow-pointer-lock allow-downloads allow-same-origin"></iframe>
+    <div id="runnerLoader" class="runner-overlay">
+      <div class="spinner"></div>
+    </div>
+    <div id="runnerError" class="runner-overlay hidden">
+      <div class="runner-message">
+        <p id="runnerErrorMsg">Could not load this code.</p>
+        <button id="runnerBackBtn" type="button">Back</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
