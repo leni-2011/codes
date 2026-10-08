@@ -1,305 +1,402 @@
 (() => {
-  'use strict';
+  const $ = (id) => document.getElementById(id);
 
-  const hub = document.getElementById('hub');
-  const runner = document.getElementById('runner');
-  const codeInput = document.getElementById('codeInput');
-  const clearBtn = document.getElementById('clearBtn');
-  const goBtn = document.getElementById('goBtn');
-  const result = document.getElementById('result');
-  const errorMsg = document.getElementById('errorMsg');
-  const successBlock = document.getElementById('successBlock');
-  const loader = document.getElementById('loader');
-  const resultUrl = document.getElementById('resultUrl');
-  const codeName = document.getElementById('codeName');
-  const copyBtn = document.getElementById('copyBtn');
-  const openBtn = document.getElementById('openBtn');
-  const runnerFrame = document.getElementById('runnerFrame');
-  const runnerLoader = document.getElementById('runnerLoader');
-  const runnerError = document.getElementById('runnerError');
-  const runnerErrorMsg = document.getElementById('runnerErrorMsg');
-  const runnerBackBtn = document.getElementById('runnerBackBtn');
+  const hub = $('hub');
+  const runner = $('runner');
+  const frame = $('runnerFrame');
+  const playground = $('playground');
+  const editor = $('codeTextarea');
+  const gutter = $('lineNumbers');
+  const highlight = $('codeHl');
+  const stdin = $('stdinInput');
+  const runBtn = $('runBtn');
+  const status = $('runStatus');
+  const output = $('outputText');
+  const outputFrame = $('outputFrame');
+  const codeInput = $('codeInput');
+  const resultUrl = $('resultUrl');
+  const modal = $('openModal');
 
-  let activeBlobUrl = null;
+  const homeTitle = document.title;
+  let code = null;
+  let blobUrl = null;
+  let hlLang = null;
+  let running = false;
 
-  function extractId(raw) {
-    if (!raw) return null;
-    const s = raw.trim();
-    const match = s.match(/compiler-playground\/(?:id\/)?([a-zA-Z0-9_-]+)/i);
-    if (match) return match[1];
-    const hashMatch = s.match(/#([a-zA-Z0-9_-]{4,})/);
-    if (hashMatch) return hashMatch[1];
-    const clean = s.replace(/^#/, '').split(/[?&#]/)[0];
-    if (/^[a-zA-Z0-9_-]{4,}$/.test(clean)) return clean;
-    return null;
+  const langs = {
+    py: ['Python', 'main.py', 'python'],
+    cpp: ['C++', 'main.cpp', 'cpp'],
+    c: ['C', 'main.c', 'c'],
+    cs: ['C#', 'Program.cs', 'csharp'],
+    java: ['Java', 'Program.java', 'java'],
+    kt: ['Kotlin', 'Main.kt', 'kotlin'],
+    swift: ['Swift', 'main.swift', 'swift'],
+    rb: ['Ruby', 'main.rb', 'ruby'],
+    php: ['PHP', 'index.php', 'php'],
+    go: ['Go', 'main.go', 'go'],
+    node: ['JavaScript', 'index.js', 'javascript'],
+    web: ['Web', 'index.html']
+  };
+
+  const aliases = {
+    python: 'py', 'c++': 'cpp', csharp: 'cs', 'c#': 'cs', kotlin: 'kt',
+    ruby: 'rb', golang: 'go', js: 'node', javascript: 'node', html: 'web'
+  };
+
+  function langInfo(raw) {
+    let key = (raw || '').toLowerCase().trim();
+    key = aliases[key] || key;
+    const [name, file, hl] = langs[key] || [key.toUpperCase() || 'Code', 'main.txt'];
+    return { name, file, hl, isWeb: key === 'web' };
   }
 
-  function baseUrl() {
-    return "https://leni-2011.github.io/codes";
+  function extractId(input) {
+    const s = input.trim();
+    const m = s.match(/compiler-playground\/(?:id\/)?([\w-]+)/i)
+      || s.match(/#([\w-]{4,})/)
+      || s.match(/^([\w-]{4,})(?:[?&#]|$)/);
+    return m ? m[1] : null;
   }
 
-  function extractInitialData(html) {
-    const marker = 'window.initialData';
-    const idx = html.indexOf(marker);
-    if (idx === -1) return null;
+  const BASE_URL = 'https://leni-2011.github.io/codes';
 
-    const eqIdx = html.indexOf('=', idx);
-    if (eqIdx === -1) return null;
+  function shareUrl(id) {
+    return `${BASE_URL}#${id}`;
+  }
 
-    const startObj = html.indexOf('{', eqIdx);
-    if (startObj === -1) return null;
-
-    const scriptEnd = html.indexOf('<' + '/script>', startObj);
-    const candidate = scriptEnd !== -1 ? html.slice(startObj, scriptEnd) : html.slice(startObj);
-    let trimmed = candidate.trim();
-    if (trimmed.endsWith(';')) trimmed = trimmed.slice(0, -1).trim();
-
+  function parsePage(html) {
+    const m = html.match(/window\.initialData\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/);
+    if (!m) return null;
     try {
-      return JSON.parse(trimmed);
-    } catch (e) { }
-
-    let depth = 0;
-    let inString = false;
-    let escape = false;
-    for (let i = startObj; i < html.length; i++) {
-      const ch = html[i];
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === '\\') {
-        escape = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (!inString) {
-        if (ch === '{') depth++;
-        else if (ch === '}') {
-          depth--;
-          if (depth === 0) {
-            try {
-              return JSON.parse(html.slice(startObj, i + 1));
-            } catch (e) { }
-            break;
-          }
-        }
-      }
+      return JSON.parse(m[1]).ssrUserCode?.data;
+    } catch {
+      return null;
     }
-
-    return null;
   }
 
   async function fetchCode(id) {
-    const url = `https://www.sololearn.com/compiler-playground/${id}`;
-    const endpoints = [
-      url,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+    const api = `https://api2.sololearn.com/v2/codeplayground/usercodes/${id}`;
+    const page = `https://www.sololearn.com/compiler-playground/${id}`;
+    const proxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+
+    const sources = [
+      [api, async (res) => (await res.json()).data],
+      [proxy(api), async (res) => (await res.json()).data],
+      [page, async (res) => parsePage(await res.text())],
+      [proxy(page), async (res) => parsePage(await res.text())]
     ];
 
-    for (const endpoint of endpoints) {
+    for (const [url, read] of sources) {
       try {
-        const res = await fetch(endpoint);
+        const res = await fetch(url);
         if (!res.ok) continue;
-        const html = await res.text();
-        const data = extractInitialData(html);
-        const code = data?.ssrUserCode?.data;
-        if (!code) continue;
-
-        if (code.language && code.language.toLowerCase() !== 'web') {
-          throw new Error(`This code is written in ${code.language}. SoloRunner only supports Web codes.`);
-        }
-
-        return code;
-      } catch (err) {
-        if (err.message && err.message.includes('SoloRunner only supports')) throw err;
-      }
+        const data = await read(res);
+        if (data) return data;
+      } catch {}
     }
-
-    throw new Error('Could not fetch this code. Make sure the link or ID is correct and the code is public.');
+    throw new Error('Could not load this code. Make sure the ID is valid and the code is public.');
   }
 
-  function stitch(code) {
-    const { sourceCode = '', cssCode = '', jsCode = '', name = '' } = code;
-    const style = cssCode ? `<style>${cssCode}</style>` : '';
-    const script = jsCode ? '<script>' + jsCode + '<' + '/script>' : '';
-    let doc = sourceCode.trim();
-
+  function buildPage({ sourceCode, cssCode, jsCode, name }) {
+    const style = cssCode ? `<style>\n${cssCode}\n</style>` : '';
+    const script = jsCode ? `<script>\n${jsCode}\n</script>` : '';
+    let doc = (sourceCode || '').trim();
     const hasHead = /<head[^>]*>/i.test(doc);
     const hasBody = /<body[^>]*>/i.test(doc);
 
-    if (hasHead) doc = doc.replace(/<\/head>/i, `${style}\n</head>`);
-    if (hasBody) doc = doc.replace(/<\/body>/i, `${script}\n</body>`);
-
     if (!hasHead && !hasBody) {
-      const esc = (name || 'SoloLearn Output').replace(/</g, '&lt;');
-      doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc}</title>${style}</head><body>${doc}${script}</body></html>`;
-    } else {
-      if (!hasHead && style) doc = style + '\n' + doc;
-      if (!hasBody && script) doc = doc + '\n' + script;
+      const title = (name || '').replace(/</g, '&lt;');
+      return `<!DOCTYPE html><html><head><meta charset="UTF-8">`
+        + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+        + `<title>${title}</title>${style}</head><body>${doc}${script}</body></html>`;
     }
 
+    doc = hasHead ? doc.replace(/<\/head>/i, `${style}\n</head>`) : style + doc;
+    doc = hasBody ? doc.replace(/<\/body>/i, `${script}\n</body>`) : doc + script;
     return doc;
   }
 
-  function renderToFrame(iframe, code) {
-    if (activeBlobUrl) {
-      URL.revokeObjectURL(activeBlobUrl);
-      activeBlobUrl = null;
-    }
-    const blob = new Blob([stitch(code)], { type: 'text/html;charset=utf-8' });
-    activeBlobUrl = URL.createObjectURL(blob);
-    iframe.src = activeBlobUrl;
+  function showWeb(data) {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(new Blob([buildPage(data)], { type: 'text/html' }));
+    frame.src = blobUrl;
+    frame.classList.remove('hidden');
   }
 
-  function showState(state) {
-    result.classList.remove('hidden');
-    errorMsg.classList.add('hidden');
-    successBlock.classList.add('hidden');
-    loader.classList.add('hidden');
-
-    if (state === 'loading') loader.classList.remove('hidden');
-    if (state === 'error') errorMsg.classList.remove('hidden');
-    if (state === 'success') successBlock.classList.remove('hidden');
+  function splitHtml(text) {
+    const start = text.search(/<!doctype html|<html[\s>]/i);
+    if (start !== -1) return [text.slice(0, start), text.slice(start)];
+    if (/^<[a-z!][\s\S]*>$/i.test(text.trim())) return ['', text.trim()];
+    return [text, ''];
   }
 
-  async function generate() {
-    const id = extractId(codeInput.value);
-    if (!id) {
-      showState('error');
-      errorMsg.textContent = 'Please enter a valid SoloLearn code link or ID.';
-      return;
-    }
-
-    showState('loading');
-    goBtn.disabled = true;
-    try {
-      const code = await fetchCode(id);
-      resultUrl.value = `${baseUrl()}#${id}`;
-      codeName.textContent = code.name ? `${code.name} by ${code.userName || 'anonymous'}` : '';
-      showState('success');
-    } catch (err) {
-      showState('error');
-      errorMsg.textContent = err.message;
-    } finally {
-      goBtn.disabled = false;
-    }
+  function print(text, cls) {
+    const span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    output.appendChild(span);
   }
 
-  function updateClearBtn() {
-    if (!clearBtn) return;
-    if (codeInput.value.length > 0) {
-      clearBtn.classList.remove('hidden');
-    } else {
-      clearBtn.classList.add('hidden');
+  function clearOutput(message) {
+    $('outputBody').classList.remove('has-frame');
+    outputFrame.classList.add('hidden');
+    outputFrame.removeAttribute('srcdoc');
+    output.classList.remove('hidden');
+    output.textContent = '';
+    if (message) print(message, 'muted');
+  }
+
+  function showOutput(stdout, stderr) {
+    clearOutput();
+    const [text, html] = splitHtml(stdout || '');
+    const out = text.trimEnd();
+    const err = (stderr || '').trimEnd();
+
+    if (out) print(out + '\n');
+    if (err) print(err + '\n', 'stderr');
+
+    if (html) {
+      const css = '<style>html,body{margin:0;padding:8px}img,video,canvas,svg{max-width:100%;height:auto}</style>';
+      $('outputBody').classList.add('has-frame');
+      outputFrame.classList.remove('hidden');
+      outputFrame.srcdoc = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + css) : css + html;
+      if (!out && !err) output.classList.add('hidden');
+    } else if (!out && !err) {
+      print('No output.', 'muted');
     }
   }
 
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      codeInput.value = '';
-      updateClearBtn();
-      codeInput.focus();
+  function setStatus(text, state) {
+    status.textContent = text;
+    status.className = state ? `status is-${state}` : 'status';
+  }
+
+  async function compile() {
+    const res = await fetch('https://api2.sololearn.com/v2/codeplayground/v2/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        codeId: code.id || 0,
+        language: code.language || 'py',
+        code: editor.value,
+        input: stdin.value
+      })
     });
+    if (!res.ok) throw new Error(`Compiler returned HTTP ${res.status}`);
+
+    const json = await res.json();
+    if (!json.success && json.errors?.length) throw new Error(json.errors.join('; '));
+    return json.data || {};
   }
 
-  codeInput.addEventListener('input', updateClearBtn);
-  updateClearBtn();
+  async function run() {
+    if (running || !code) return;
+    running = true;
+    runBtn.disabled = true;
+    $('runLabel').textContent = 'Running';
+    setStatus('Running');
+    clearOutput('Running...');
+    showTab('output');
 
-  goBtn.addEventListener('click', generate);
-  codeInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') generate();
-  });
-
-  async function copyText(text) {
+    const start = performance.now();
     try {
-      await navigator.clipboard.writeText(text);
-      return true;
+      const { output: stdout, error } = await compile();
+      showOutput(stdout, error);
+      const secs = ((performance.now() - start) / 1000).toFixed(2);
+      setStatus(`${secs}s`, error?.trim() ? 'error' : 'done');
     } catch (err) {
-      const box = document.createElement("textarea");
-      box.value = text;
-      box.setAttribute("readonly", "");
-      box.style.position = "fixed";
-      box.style.opacity = "0";
-      document.body.appendChild(box);
-      box.select();
-      let ok = false;
-      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-      box.remove();
-      return ok;
+      clearOutput();
+      print(err.message, 'stderr');
+      setStatus('Error', 'error');
     }
+    running = false;
+    runBtn.disabled = false;
+    $('runLabel').textContent = 'Run';
   }
 
-  copyBtn.addEventListener('click', async () => {
-    if (!resultUrl.value) return;
-    const ok = await copyText(resultUrl.value);
-    if (ok) {
-      const prev = copyBtn.textContent;
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => {
-        copyBtn.textContent = prev;
-      }, 1500);
-    }
-  });
+  function syncScroll() {
+    gutter.scrollTop = editor.scrollTop;
+    highlight.parentElement.scrollTop = editor.scrollTop;
+    highlight.parentElement.scrollLeft = editor.scrollLeft;
+  }
 
-  openBtn.addEventListener('click', () => {
-    if (resultUrl.value) {
-      window.open(resultUrl.value, '_blank');
-    }
-  });
+  function refreshEditor() {
+    const text = editor.value;
+    gutter.innerHTML = text.split('\n').map((_, i) => `<div>${i + 1}</div>`).join('');
 
-  function openRunner(id) {
+    const canHighlight = !!(window.hljs && hlLang && hljs.getLanguage(hlLang));
+    $('codeArea').classList.toggle('has-hl', canHighlight);
+    if (canHighlight) {
+      highlight.innerHTML = hljs.highlight(text.endsWith('\n') ? text + ' ' : text, { language: hlLang }).value;
+    }
+    syncScroll();
+  }
+
+  function showTab(name) {
+    $('workspace').dataset.view = name;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  }
+
+  function setInputOpen(open) {
+    $('inputPanel').classList.toggle('hidden', !open);
+    $('inputToggle').classList.toggle('active', open);
+    $('inputToggle').setAttribute('aria-expanded', open);
+    if (open) stdin.focus();
+  }
+
+  function showPlayground(data) {
+    const lang = langInfo(data.language);
+    $('pgTitle').textContent = data.name || 'Untitled';
+    $('pgMeta').textContent = `${data.userName || 'Anonymous'} · ${lang.name}`;
+    $('fileName').textContent = lang.file;
+
+    hlLang = lang.hl;
+    editor.value = data.sourceCode || '';
+    refreshEditor();
+
+    stdin.value = '';
+    setInputOpen(false);
+    setStatus('');
+    clearOutput('Press Run to see the output.');
+    showTab('code');
+    playground.classList.remove('hidden');
+  }
+
+  async function openRunner(id) {
     hub.classList.add('hidden');
     runner.classList.remove('hidden');
-    runnerLoader.classList.remove('hidden');
-    runnerError.classList.add('hidden');
+    frame.classList.add('hidden');
+    playground.classList.add('hidden');
+    $('runnerError').classList.add('hidden');
+    $('runnerLoader').classList.remove('hidden');
 
-    fetchCode(id)
-      .then((code) => {
-        document.title = code.name || 'SoloRunner';
-        renderToFrame(runnerFrame, code);
-        runnerLoader.classList.add('hidden');
-      })
-      .catch((err) => {
-        runnerLoader.classList.add('hidden');
-        runnerError.classList.remove('hidden');
-        runnerErrorMsg.textContent = err.message;
-      });
+    try {
+      code = await fetchCode(id);
+      document.title = code.name || 'Code';
+      if (langInfo(code.language).isWeb) showWeb(code);
+      else showPlayground(code);
+    } catch (err) {
+      $('runnerErrorMsg').textContent = err.message;
+      $('runnerError').classList.remove('hidden');
+    }
+    $('runnerLoader').classList.add('hidden');
   }
 
   function closeRunner() {
     runner.classList.add('hidden');
     hub.classList.remove('hidden');
-    runnerFrame.src = 'about:blank';
-    if (activeBlobUrl) {
-      URL.revokeObjectURL(activeBlobUrl);
-      activeBlobUrl = null;
-    }
-    document.title = 'SoloRunner';
-    history.pushState('', '', window.location.pathname);
+    frame.src = 'about:blank';
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = null;
+    code = null;
+    document.title = homeTitle;
   }
 
-  runnerBackBtn.addEventListener('click', closeRunner);
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !runner.classList.contains('hidden')) {
-      closeRunner();
+  function showResult(state) {
+    $('result').classList.remove('hidden');
+    $('errorMsg').classList.toggle('hidden', state !== 'error');
+    $('successBlock').classList.toggle('hidden', state !== 'success');
+    $('loader').classList.toggle('hidden', state !== 'loading');
+  }
+
+  function showError(message) {
+    $('errorMsg').textContent = message;
+    showResult('error');
+  }
+
+  async function generate() {
+    const id = extractId(codeInput.value);
+    if (!id) return showError('Please enter a valid SoloLearn code link or code ID.');
+
+    showResult('loading');
+    $('goBtn').disabled = true;
+    try {
+      const data = await fetchCode(id);
+      resultUrl.value = shareUrl(id);
+      $('codeName').textContent = data.name ? `${data.name} by ${data.userName || 'anonymous'}` : 'Untitled';
+      $('codeLangBadge').textContent = langInfo(data.language).name;
+      showResult('success');
+    } catch (err) {
+      showError(err.message);
+    }
+    $('goBtn').disabled = false;
+  }
+
+  function updateClearBtn() {
+    $('clearBtn').classList.toggle('hidden', !codeInput.value);
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+    $('openBtn').focus();
+  }
+
+  editor.addEventListener('input', refreshEditor);
+  editor.addEventListener('scroll', syncScroll);
+  editor.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    editor.setRangeText('    ', editor.selectionStart, editor.selectionEnd, 'end');
+    refreshEditor();
+  });
+
+  runBtn.addEventListener('click', run);
+  $('inputToggle').addEventListener('click', () => setInputOpen($('inputPanel').classList.contains('hidden')));
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+  $('clearBtn').addEventListener('click', () => {
+    codeInput.value = '';
+    updateClearBtn();
+    codeInput.focus();
+  });
+  codeInput.addEventListener('input', updateClearBtn);
+  codeInput.addEventListener('keydown', (e) => e.key === 'Enter' && generate());
+  $('goBtn').addEventListener('click', generate);
+
+  document.querySelectorAll('.chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      codeInput.value = chip.dataset.id;
+      updateClearBtn();
+      generate();
+    });
+  });
+
+  $('copyBtn').addEventListener('click', async (e) => {
+    try {
+      await navigator.clipboard.writeText(resultUrl.value);
+      e.target.textContent = 'Copied';
+      setTimeout(() => (e.target.textContent = 'Copy Link'), 1500);
+    } catch {
+      resultUrl.select();
+    }
+  });
+
+  $('openBtn').addEventListener('click', () => {
+    modal.classList.remove('hidden');
+    $('modalConfirm').focus();
+  });
+  $('modalConfirm').addEventListener('click', () => {
+    closeModal();
+    window.open(resultUrl.value, '_blank', 'noopener');
+  });
+  $('modalCancel').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => e.target === modal && closeModal());
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !playground.classList.contains('hidden')) {
+      e.preventDefault();
+      run();
     }
   });
 
   function route() {
-    const hash = location.hash.replace(/^#/, '').split('?')[0].trim();
-    const id = extractId(hash);
-    if (id) {
-      openRunner(id);
-    } else {
-      closeRunner();
-    }
+    const id = extractId(location.hash.slice(1));
+    if (id) openRunner(id);
+    else closeRunner();
   }
 
+  updateClearBtn();
   window.addEventListener('hashchange', route);
-  if (location.hash.replace(/^#/, '').trim()) {
-    route();
-  }
+  if (location.hash.length > 1) route();
 })();
