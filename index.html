@@ -4,8 +4,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title></title>
+  <title>mimi</title>
   <meta name="theme-color" content="#0e0e10">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -17,17 +18,17 @@
       </header>
 
       <section class="intro">
-        <h1 class="title">Share your SoloLearn web code as a standalone page.</h1>
-        <p class="subtitle">Paste a code link or ID below. You'll get a link anyone can open, no SoloLearn account
-          needed.</p>
+        <h1 class="title">Share your SoloLearn code as a website</h1>
+        <p class="subtitle">Paste a code link below. You'll get a link anyone can open as a web page.</p>
       </section>
 
       <section class="form">
-        <label class="field-label" for="codeInput">Code link or ID</label>
+        <label class="field-label" for="codeInput">SoloLearn Code Link or ID</label>
         <div class="input-group">
           <div class="input-wrapper">
-            <input type="text" id="codeInput" placeholder="sololearn.com/compiler-playground/…" spellcheck="false"
-              autocomplete="off" value="https://sololearn.com/compiler-playground/W7SXQzUEbvij/?ref=app" />
+            <input type="text" id="codeInput" placeholder="e.g. c3ww2R6QAkl4 or sololearn.com/compiler-playground/…"
+              spellcheck="false" autocomplete="off"
+              value="https://sololearn.com/compiler-playground/c3ww2R6QAkl4/?ref=app" />
             <button id="clearBtn" type="button" class="clear-btn" aria-label="Clear input" title="Clear">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round">
@@ -36,22 +37,33 @@
               </svg>
             </button>
           </div>
-          <button id="goBtn" type="button">Generate</button>
+          <button id="goBtn" type="button">Generate Link</button>
+        </div>
+
+        <div class="sample-chips">
+          <span class="sample-label">Try samples:</span>
+          <button type="button" class="chip" data-id="c3ww2R6QAkl4">Python: Hello World</button>
+          <button type="button" class="chip" data-id="c056yBnu037R">Python: 8 Balls</button>
+          <button type="button" class="chip" data-id="cUgrv3Zcymll">Python: Letter Counter</button>
+          <button type="button" class="chip" data-id="W7SXQzUEbvij">Web: Chat Room</button>
         </div>
 
         <div id="result" class="result hidden">
           <div id="errorMsg" class="error hidden"></div>
 
           <div id="successBlock" class="success hidden">
-            <span class="result-label">Your link</span>
+            <span class="result-label">Your webpage link</span>
             <div class="result-url-row">
               <input type="text" id="resultUrl" readonly />
               <div class="result-actions">
-                <button id="copyBtn" type="button">Copy</button>
+                <button id="copyBtn" type="button">Copy Link</button>
                 <button id="openBtn" type="button">Open</button>
               </div>
             </div>
-            <span id="codeName" class="code-name"></span>
+            <div class="code-meta-row">
+              <span id="codeName" class="code-name"></span>
+              <span id="codeLangBadge" class="lang-pill"></span>
+            </div>
           </div>
 
           <div id="loader" class="loader hidden">
@@ -60,34 +72,90 @@
           </div>
         </div>
       </section>
-
-      <section class="how">
-        <h2 class="how-title">How it works</h2>
-        <ol class="how-steps">
-          <li>Your code is fetched from SoloLearn, into your browser. (No backend!)</li>
-          <li>The HTML, CSS and JS are joined into a single page.</li>
-          <li>That page runs inside a sandboxed iframe each time someone opens your link.</li>
-          <li>Links are permanent. The URL never changes, and edits you make on SoloLearn show up automatically, as long as the code stays public.</li>
-        </ol>
-      </section>
     </div>
   </main>
 
   <section id="runner" class="runner hidden">
-    <iframe id="runnerFrame" class="runner-frame"
+    <iframe id="runnerFrame" class="runner-frame hidden"
       sandbox="allow-scripts allow-modals allow-forms allow-pointer-lock allow-downloads allow-same-origin"></iframe>
-    <div id="runnerLoader" class="runner-overlay">
-      <div class="spinner"></div>
-    </div>
-    <div id="runnerError" class="runner-overlay hidden">
-      <div class="runner-message">
-        <p id="runnerErrorMsg">Could not load this code.</p>
-        <button id="runnerBackBtn" type="button">Back</button>
+
+    <div id="playground" class="playground hidden">
+      <header class="pg-bar">
+        <div class="pg-info">
+          <h1 id="pgTitle" class="pg-title"></h1>
+          <span id="pgMeta" class="pg-meta"></span>
+        </div>
+        <div class="pg-actions">
+          <button id="inputToggle" type="button" class="btn" aria-expanded="false">Input</button>
+          <button id="runBtn" type="button" class="btn btn-run" title="Run (Ctrl+Enter)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <polygon points="6 4 20 12 6 20 6 4"></polygon>
+            </svg>
+            <span id="runLabel">Run</span>
+          </button>
+        </div>
+      </header>
+
+      <div id="inputPanel" class="input-panel hidden">
+        <label for="stdinInput" class="input-label">Input, one value per line</label>
+        <textarea id="stdinInput" class="stdin" rows="3" spellcheck="false"></textarea>
       </div>
+
+      <nav class="tabs">
+        <button type="button" class="tab active" data-tab="code">Code</button>
+        <button type="button" class="tab" data-tab="output">Output</button>
+      </nav>
+
+      <div id="workspace" class="workspace" data-view="code">
+        <section class="panel code-panel">
+          <div class="panel-head">
+            <span id="fileName" class="file-name"></span>
+          </div>
+          <div class="editor">
+            <div id="lineNumbers" class="gutter" aria-hidden="true"></div>
+            <div id="codeArea" class="code-area">
+              <pre class="code-hl" aria-hidden="true"><code id="codeHl" class="hljs"></code></pre>
+              <textarea id="codeTextarea" class="code" spellcheck="false" autocomplete="off" autocorrect="off"
+                autocapitalize="off"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel output-panel">
+          <div class="panel-head">
+            <span class="panel-title">Output</span>
+            <span id="runStatus" class="status"></span>
+          </div>
+          <div id="outputBody" class="output-body">
+            <pre id="outputText" class="output-text"></pre>
+            <iframe id="outputFrame" class="output-frame hidden" title="Output"
+              sandbox="allow-scripts allow-popups allow-modals allow-forms"></iframe>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="runnerLoader" class="runner-state">
+      <div class="spinner-lg"></div>
+    </div>
+
+    <div id="runnerError" class="runner-state hidden">
+      <p id="runnerErrorMsg" class="runner-error">Could not load this code.</p>
     </div>
   </section>
 
-  <script src="app.js"></script>
+  <div id="openModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="openModalText">
+    <div class="modal-box">
+      <p id="openModalText" class="modal-text">This will open in your browser.</p>
+      <div class="modal-actions">
+        <button id="modalCancel" type="button" class="modal-btn">Cancel</button>
+        <button id="modalConfirm" type="button" class="modal-btn modal-btn-primary">Open</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 
 </html>
